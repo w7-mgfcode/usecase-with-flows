@@ -120,8 +120,15 @@ A complete release package should achieve:
 
 ## Documentation
 
-- [Implementation Guide](./implementation-guide.md) - Detailed usage instructions
+- [Release Package Prompt](./release-package-prompt.md) - **Main prompt** with persona, workflow, and methodology
+- [Implementation Guide](./implementation-guide.md) - Detailed usage instructions and command syntax
 - [SERENA Memory Guide](./serena-memory-guide.md) - Memory management system
+
+## Claude Persona
+
+When using this template, Claude adopts the **Release Package Architect** persona:
+
+> A senior technical writer and DevOps strategist who thinks from the perspective of developers, operators, customers, and support teams. Applies reverse-thinking methodology and prioritizes clarity, completeness, and actionability.
 
 ## Contributing
 
