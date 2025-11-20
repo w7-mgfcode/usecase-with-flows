@@ -122,7 +122,8 @@ A complete release package should achieve:
 
 - [Release Package Prompt](./release-package-prompt.md) - **Main prompt** with persona, workflow, and methodology
 - [Implementation Guide](./implementation-guide.md) - Detailed usage instructions and command syntax
-- [SERENA Memory Guide](./serena-memory-guide.md) - Memory management system
+- [SERENA Memory Guide](./serena-memory-guide.md) - Memory management concepts
+- [SERENA Quick-Start Reference](./serena-quickstart-reference.md) - **Complete reference** with YAML templates, checklists, and team workflows
 
 ## Claude Persona
 
