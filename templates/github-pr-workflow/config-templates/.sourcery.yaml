@@ -1,0 +1,280 @@
+# Sourcery Configuration
+# Copy this file to the root of your repository as .sourcery.yaml
+
+# Python version (for Python projects)
+python_version: "3.10"
+
+# Refactoring settings
+refactor:
+  # Skip Sourcery's default ignore patterns
+  skip_default_patterns: false
+
+  # Maximum complexity score for functions (lower = stricter)
+  # Default is 10, consider 7-8 for stricter enforcement
+  max_complexity: 10
+
+  # Skip refactoring suggestions in certain directories
+  skip_paths:
+    - "tests/"
+    - "docs/"
+    - "migrations/"
+    - "venv/"
+    - "node_modules/"
+
+# Custom rules
+rules:
+  # Enforce docstrings on public functions
+  - id: require-docstrings
+    description: Public functions must have docstrings
+    pattern: |
+      def $FUNC(...):
+        $BODY
+    condition: |
+      not has_docstring($FUNC) and not is_private($FUNC)
+    tests:
+      - match: |
+          def calculate_total(items):
+              return sum(items)
+      - no_match: |
+          def calculate_total(items):
+              """Calculate the total of items."""
+              return sum(items)
+
+  # Discourage long functions
+  - id: no-long-functions
+    description: Functions should be less than 50 lines
+    pattern: |
+      def $FUNC(...):
+        $BODY
+    condition: len($BODY) > 50
+    tests:
+      - match: |
+          def very_long_function():
+              line1
+              line2
+              # ... 50+ lines
+
+  # Require type hints on public functions
+  - id: require-type-hints
+    description: Public functions should have type hints
+    pattern: |
+      def $FUNC($ARGS):
+        $BODY
+    condition: |
+      not has_return_type($FUNC) and not is_private($FUNC)
+
+  # Security: Avoid eval and exec
+  - id: no-eval-exec
+    description: Avoid eval() and exec() for security reasons
+    pattern: |
+      eval($EXPR)
+    tests:
+      - match: eval(user_input)
+
+  - id: no-exec
+    description: Avoid eval() and exec() for security reasons
+    pattern: |
+      exec($EXPR)
+    tests:
+      - match: exec(user_input)
+
+  # Prefer pathlib over os.path
+  - id: prefer-pathlib
+    description: Use pathlib instead of os.path
+    pattern: |
+      os.path.$METHOD($ARGS)
+    suggestion: |
+      Path($ARGS).$PATHLIB_METHOD()
+
+  # Prefer f-strings over .format()
+  - id: prefer-fstrings
+    description: Use f-strings instead of .format() for readability
+    pattern: |
+      "$STRING".format($ARGS)
+    condition: python_version >= "3.6"
+    suggestion: |
+      f"$STRING"
+
+# GitHub integration
+github:
+  # Request review from PR author when Sourcery suggests changes
+  request_review: author
+
+  # Branch for Sourcery's automated improvement PRs
+  sourcery_branch: sourcery/improvements
+
+# Code metrics thresholds
+metrics:
+  quality_threshold: 25.0  # Minimum quality score (0-100)
+
+# Language-specific settings
+languages:
+  python:
+    # Use Black-compatible formatting
+    line_length: 88
+
+    # Python-specific rules
+    rules:
+      - id: use-walrus-operator
+        description: Use walrus operator (:=) when appropriate
+        condition: python_version >= "3.8"
+
+  javascript:
+    # JavaScript rules
+    rules:
+      - id: prefer-arrow-functions
+        description: Prefer arrow functions for callbacks
+
+      - id: no-var
+        description: Use const or let instead of var
+
+  typescript:
+    # TypeScript rules
+    rules:
+      - id: avoid-any
+        description: Avoid using 'any' type
+
+      - id: prefer-interface
+        description: Prefer interface over type for object shapes
+
+# Clone detection
+clone_detection:
+  # Enable detection of duplicated code
+  enabled: true
+
+  # Minimum number of duplicated tokens to report
+  min_clone_lines: 10
+
+  # Ignore certain patterns in clone detection
+  ignore_patterns:
+    - "test_*.py"
+    - "*_test.py"
+
+# Security scanning
+security:
+  # Enable security vulnerability detection
+  enabled: true
+
+  # Security rules
+  rules:
+    - id: sql-injection
+      description: Potential SQL injection vulnerability
+
+    - id: xss-prevention
+      description: Potential XSS vulnerability
+
+    - id: hardcoded-secrets
+      description: Hardcoded secrets or credentials
+
+    - id: insecure-deserialization
+      description: Insecure deserialization
+
+    - id: path-traversal
+      description: Potential path traversal vulnerability
+
+# Performance rules
+performance:
+  rules:
+    - id: inefficient-loops
+      description: Loop can be optimized
+
+    - id: unnecessary-comprehension
+      description: List comprehension when generator would suffice
+
+    - id: repeated-computation
+      description: Computation repeated in loop
+
+# Code style
+style:
+  # Enforce naming conventions
+  naming:
+    # Function names should be snake_case
+    function: snake_case
+
+    # Class names should be PascalCase
+    class: PascalCase
+
+    # Constant names should be UPPER_CASE
+    constant: UPPER_CASE
+
+    # Variable names should be snake_case
+    variable: snake_case
+
+# Ignore specific violations
+ignore:
+  # Ignore by file pattern
+  - path: "migrations/*.py"
+    rules:
+      - no-long-functions
+      - require-docstrings
+
+  # Ignore by rule in specific files
+  - path: "tests/**/*.py"
+    rules:
+      - max-complexity
+
+  # Ignore specific lines with inline comments
+  # Example: # sourcery skip: rule-id
+
+# Custom tags for categorizing suggestions
+tags:
+  - name: security
+    description: Security-related improvements
+
+  - name: performance
+    description: Performance optimizations
+
+  - name: readability
+    description: Code readability improvements
+
+  - name: maintainability
+    description: Code maintainability improvements
+
+# AI-assisted refactoring settings
+ai:
+  # Enable AI-powered suggestions
+  enabled: true
+
+  # Confidence threshold for AI suggestions (0.0-1.0)
+  confidence_threshold: 0.7
+
+# Notification settings
+notifications:
+  # Notify on high-priority issues
+  high_priority: true
+
+  # Daily summary of suggestions
+  daily_summary: false
+
+# Integration with other tools
+integrations:
+  # Pre-commit hook
+  pre_commit:
+    enabled: false
+
+  # IDE integration
+  ide:
+    enabled: true
+    auto_fix: false  # Don't auto-apply fixes without review
+
+# Logging and diagnostics
+logging:
+  level: info  # debug, info, warning, error
+
+# Review templates
+templates:
+  review_comment: |
+    **Sourcery Suggestion**: {description}
+
+    **Current Code**:
+    ```{language}
+    {before}
+    ```
+
+    **Suggested Improvement**:
+    ```{language}
+    {after}
+    ```
+
+    **Benefit**: {benefit}
+    **Category**: {tags}

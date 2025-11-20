@@ -1,0 +1,143 @@
+# CodeRabbit Configuration
+# Copy this file to the root of your repository as .coderabbit.yaml
+
+# Review behavior
+reviews:
+  # Profile: "chill" for fewer comments, "assertive" for more thorough review
+  profile: chill
+
+  # Request changes workflow (true/false)
+  request_changes_workflow: false
+
+  # High-level summary at the beginning of review
+  high_level_summary: true
+
+  # Include a poem in the review (fun feature)
+  poem: false
+
+  # Show review status badge
+  review_status: true
+
+  # Collapse the walkthrough section by default
+  collapse_walkthrough: false
+
+  # Auto-review settings
+  auto_review:
+    enabled: true
+    drafts: false  # Don't auto-review draft PRs
+
+# Language preference
+language: en-US
+
+# Chat settings
+chat:
+  auto_reply: true
+
+# Path-based instructions for specialized review focus
+path_instructions:
+  # Frontend code
+  - path: "src/components/**/*.{js,jsx,ts,tsx}"
+    instructions: |
+      Focus on React best practices:
+      - Component composition and reusability
+      - Proper hook usage
+      - Performance optimization (useMemo, useCallback)
+      - Accessibility (ARIA attributes, semantic HTML)
+
+  # Backend API code
+  - path: "src/api/**/*.{js,ts}"
+    instructions: |
+      Focus on API design:
+      - RESTful conventions
+      - Input validation
+      - Error handling and status codes
+      - Security (authentication, authorization)
+      - Rate limiting considerations
+
+  # Database code
+  - path: "src/models/**/*.{js,ts,py}"
+    instructions: |
+      Focus on database interactions:
+      - Query efficiency (N+1 problems)
+      - Index usage
+      - Data validation
+      - Migration safety
+
+  # Test files
+  - path: "test/**/*"
+    instructions: |
+      Focus on test quality:
+      - Clear test descriptions
+      - Comprehensive edge case coverage
+      - Proper mocking and stubbing
+      - Meaningful assertions
+
+  # Security-sensitive code
+  - path: "src/{auth,security}/**/*"
+    instructions: |
+      Extra scrutiny for security:
+      - Authentication and authorization logic
+      - Input sanitization
+      - Encryption usage
+      - Secret management
+      - OWASP Top 10 compliance
+
+  # Documentation
+  - path: "docs/**/*.md"
+    instructions: |
+      Check for documentation quality:
+      - Clarity and completeness
+      - Accuracy of technical details
+      - Up-to-date with code changes
+      - Proper formatting and structure
+
+  # Configuration files
+  - path: "{package.json,*.config.js,*.config.ts}"
+    instructions: |
+      Review configuration changes:
+      - Dependency updates (security implications)
+      - Build configuration correctness
+      - Environment variable usage
+
+# GitHub integration settings
+github:
+  # Auto-generate commit suggestions
+  commit_suggestions: true
+
+  # Comment on specific lines
+  line_comments: true
+
+  # Summarize review at PR level
+  summary_comments: true
+
+# Advanced settings
+early_access: false
+
+# Ignore certain files or patterns
+ignore:
+  - "**/*.min.js"
+  - "**/*.bundle.js"
+  - "dist/**"
+  - "build/**"
+  - "node_modules/**"
+  - "vendor/**"
+  - "*.lock"
+  - "*.sum"
+
+# Custom rules (optional)
+rules:
+  # Example: Enforce specific patterns
+  - id: no-console-log
+    pattern: "console\\.log"
+    message: "Avoid console.log in production code. Use proper logging library."
+    severity: medium
+
+  - id: no-hardcoded-secrets
+    pattern: "(password|api_key|secret|token)\\s*=\\s*['\"][^'\"]{8,}['\"]"
+    message: "Potential hardcoded secret detected. Use environment variables."
+    severity: critical
+
+  - id: prefer-const
+    pattern: "let\\s+\\w+\\s*=.*(?!.*=)"
+    message: "Consider using 'const' instead of 'let' for variables that are never reassigned."
+    severity: low

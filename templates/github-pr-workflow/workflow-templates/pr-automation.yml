@@ -1,0 +1,248 @@
+# GitHub PR Automation Workflow Template
+# Copy this file to .github/workflows/pr-automation.yml in your repository
+
+name: PR Automation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to analyze'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  pr-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: PR Size Analysis
+        run: |
+          FILES_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null | wc -l || echo 0)
+          ADDITIONS=$(git diff --shortstat origin/${{ github.base_ref }}...HEAD 2>/dev/null | grep -oP '\d+(?= insertion)' || echo 0)
+          DELETIONS=$(git diff --shortstat origin/${{ github.base_ref }}...HEAD 2>/dev/null | grep -oP '\d+(?= deletion)' || echo 0)
+
+          echo "## PR Analytics" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files Changed**: $FILES_CHANGED" >> $GITHUB_STEP_SUMMARY
+          echo "- **Additions**: +$ADDITIONS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deletions**: -$DELETIONS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Changes**: $((ADDITIONS + DELETIONS))" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Warn on large PRs
+          if [ "$FILES_CHANGED" -gt 20 ]; then
+            echo "⚠️ **Large PR Detected**: Consider splitting into smaller PRs for easier review" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "$((ADDITIONS + DELETIONS))" -gt 500 ]; then
+            echo "⚠️ **High Change Volume**: $((ADDITIONS + DELETIONS)) lines changed. Consider breaking into focused changes." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Detect Branch Strategy
+        run: |
+          BRANCH_NAME="${{ github.head_ref }}"
+
+          if [[ $BRANCH_NAME == feature/* ]]; then
+            MERGE_STRATEGY="squash"
+            BRANCH_TYPE="feature"
+          elif [[ $BRANCH_NAME == bugfix/* ]]; then
+            MERGE_STRATEGY="squash"
+            BRANCH_TYPE="bugfix"
+          elif [[ $BRANCH_NAME == hotfix/* ]]; then
+            MERGE_STRATEGY="merge"
+            BRANCH_TYPE="hotfix"
+          elif [[ $BRANCH_NAME == release/* ]]; then
+            MERGE_STRATEGY="merge"
+            BRANCH_TYPE="release"
+          else
+            MERGE_STRATEGY="rebase"
+            BRANCH_TYPE="chore"
+          fi
+
+          echo "MERGE_STRATEGY=$MERGE_STRATEGY" >> $GITHUB_ENV
+          echo "BRANCH_TYPE=$BRANCH_TYPE" >> $GITHUB_ENV
+
+          echo "## Branch Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`$BRANCH_NAME\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type**: $BRANCH_TYPE" >> $GITHUB_STEP_SUMMARY
+          echo "- **Recommended Merge Strategy**: $MERGE_STRATEGY" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Validate Commit Messages
+        run: |
+          COMMITS=$(git log --oneline origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "No commits")
+
+          echo "## Recent Commits" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$COMMITS" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check for conventional commits
+          VALID_COMMITS=$(echo "$COMMITS" | grep -cE '^[a-f0-9]+ (feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?:' || echo 0)
+          TOTAL_COMMITS=$(echo "$COMMITS" | wc -l)
+
+          if [ "$VALID_COMMITS" -eq "$TOTAL_COMMITS" ]; then
+            echo "✅ All commits follow conventional commit format" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Some commits don't follow conventional commit format" >> $GITHUB_STEP_SUMMARY
+            echo "Consider using: \`feat:\`, \`fix:\`, \`docs:\`, \`refactor:\`, etc." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check for Conflicts
+        run: |
+          git fetch origin ${{ github.base_ref }}
+
+          if git merge-tree $(git merge-base HEAD origin/${{ github.base_ref }}) HEAD origin/${{ github.base_ref }} | grep -q '<<<<<'; then
+            echo "❌ **Merge conflicts detected**" >> $GITHUB_STEP_SUMMARY
+            echo "Please resolve conflicts before merging" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ No merge conflicts" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect Project Type
+        id: detect
+        run: |
+          if [ -f "package.json" ]; then
+            echo "type=node" >> $GITHUB_OUTPUT
+          elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+            echo "type=python" >> $GITHUB_OUTPUT
+          elif [ -f "Cargo.toml" ]; then
+            echo "type=rust" >> $GITHUB_OUTPUT
+          elif [ -f "go.mod" ]; then
+            echo "type=go" >> $GITHUB_OUTPUT
+          else
+            echo "type=generic" >> $GITHUB_OUTPUT
+          fi
+
+      # Node.js
+      - name: Setup Node.js
+        if: steps.detect.outputs.type == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies (Node)
+        if: steps.detect.outputs.type == 'node'
+        run: npm ci
+
+      - name: Run Tests (Node)
+        if: steps.detect.outputs.type == 'node'
+        run: npm test || echo "No tests configured"
+
+      - name: Run Linter (Node)
+        if: steps.detect.outputs.type == 'node'
+        run: npm run lint || echo "No linter configured"
+
+      # Python
+      - name: Setup Python
+        if: steps.detect.outputs.type == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies (Python)
+        if: steps.detect.outputs.type == 'python'
+        run: pip install -r requirements.txt || pip install -e .
+
+      - name: Run Tests (Python)
+        if: steps.detect.outputs.type == 'python'
+        run: pytest || python -m unittest || echo "No tests configured"
+
+      - name: Run Linter (Python)
+        if: steps.detect.outputs.type == 'python'
+        run: pylint . || flake8 . || echo "No linter configured"
+
+      # Rust
+      - name: Setup Rust
+        if: steps.detect.outputs.type == 'rust'
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run Tests (Rust)
+        if: steps.detect.outputs.type == 'rust'
+        run: cargo test
+
+      - name: Run Linter (Rust)
+        if: steps.detect.outputs.type == 'rust'
+        run: cargo clippy -- -D warnings || echo "Clippy warnings found"
+
+      # Go
+      - name: Setup Go
+        if: steps.detect.outputs.type == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run Tests (Go)
+        if: steps.detect.outputs.type == 'go'
+        run: go test ./...
+
+      - name: Run Linter (Go)
+        if: steps.detect.outputs.type == 'go'
+        run: golint ./... || echo "No linter configured"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Dependency Audit
+        run: |
+          if [ -f "package.json" ]; then
+            npm audit --audit-level=moderate || echo "Security issues found in dependencies"
+          elif [ -f "requirements.txt" ]; then
+            pip install pip-audit
+            pip-audit || echo "Security issues found in dependencies"
+          elif [ -f "Cargo.toml" ]; then
+            cargo audit || echo "Security issues found in dependencies"
+          elif [ -f "go.mod" ]; then
+            go list -json -m all | docker run --rm -i sonatypecommunity/nancy:latest || echo "Security issues found"
+          fi
+
+      - name: Check for Secrets
+        run: |
+          # Simple secret detection
+          if grep -r -E '(password|secret|api_key|token|private_key)\s*=\s*["\047]' . --exclude-dir=node_modules --exclude-dir=.git; then
+            echo "⚠️ Potential secrets detected in code" >> $GITHUB_STEP_SUMMARY
+            echo "Review the findings and ensure no sensitive data is committed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  post-summary:
+    needs: [pr-analysis, run-tests, security-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "## PR Workflow Complete" >> $GITHUB_STEP_SUMMARY
+          echo "All automated checks have been executed." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review the analysis and test results above" >> $GITHUB_STEP_SUMMARY
+          echo "2. Address any warnings or failures" >> $GITHUB_STEP_SUMMARY
+          echo "3. Request review from team members" >> $GITHUB_STEP_SUMMARY
+          echo "4. Merge using the recommended strategy: \`${{ env.MERGE_STRATEGY }}\`" >> $GITHUB_STEP_SUMMARY

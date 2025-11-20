@@ -1,0 +1,200 @@
+# Branch Cleanup Workflow Template
+# Copy this file to .github/workflows/branch-cleanup.yml in your repository
+
+name: Branch Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly on Sunday at 2 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  cleanup-merged-branch:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Merged Branch
+        run: |
+          BRANCH="${{ github.head_ref }}"
+
+          # Protected branches that should never be deleted
+          PROTECTED_BRANCHES=("main" "master" "develop" "staging" "production")
+
+          # Check if branch matches protected patterns
+          if [[ " ${PROTECTED_BRANCHES[@]} " =~ " ${BRANCH} " ]]; then
+            echo "✅ Branch '$BRANCH' is protected, skipping deletion"
+            exit 0
+          fi
+
+          if [[ $BRANCH == release/* ]] || [[ $BRANCH == support/* ]]; then
+            echo "✅ Release/support branch '$BRANCH' preserved"
+            exit 0
+          fi
+
+          # Delete the branch
+          gh api --method DELETE repos/${{ github.repository }}/git/refs/heads/$BRANCH || \
+            echo "⚠️ Branch already deleted or not found"
+
+          echo "🗑️ Deleted merged branch: $BRANCH"
+
+  cleanup-stale-branches:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find Stale Branches
+        run: |
+          echo "## Stale Branch Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Fetch all branches
+          git fetch --all --prune
+
+          # Protected branches
+          PROTECTED="main|master|develop|staging|production|release/.*|support/.*"
+
+          CURRENT_TIME=$(date +%s)
+          STALE_COUNT=0
+
+          # List all remote branches
+          for branch in $(git branch -r --format='%(refname:short)' | grep -v 'HEAD'); do
+            # Skip protected branches
+            if echo "$branch" | grep -qE "^origin/($PROTECTED)$"; then
+              continue
+            fi
+
+            # Get last commit date
+            LAST_COMMIT_DATE=$(git log -1 --format=%at "$branch" 2>/dev/null || echo 0)
+
+            if [ "$LAST_COMMIT_DATE" -eq 0 ]; then
+              continue
+            fi
+
+            # Calculate age in days
+            DAYS_OLD=$(( ($CURRENT_TIME - $LAST_COMMIT_DATE) / 86400 ))
+
+            # Check for open PRs
+            BRANCH_NAME=${branch#origin/}
+            OPEN_PRS=$(gh pr list --head "$BRANCH_NAME" --state open --json number | jq 'length')
+
+            if [ $DAYS_OLD -gt 30 ] && [ "$OPEN_PRS" -eq 0 ]; then
+              STALE_COUNT=$((STALE_COUNT + 1))
+              echo "### Stale Branch: \`$BRANCH_NAME\`" >> $GITHUB_STEP_SUMMARY
+              echo "- **Age**: $DAYS_OLD days" >> $GITHUB_STEP_SUMMARY
+              echo "- **Last Commit**: $(git log -1 --format='%h - %s (%ar)' "$branch")" >> $GITHUB_STEP_SUMMARY
+              echo "- **Author**: $(git log -1 --format='%an' "$branch")" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+
+              # Optional: Auto-delete branches older than 60 days
+              if [ $DAYS_OLD -gt 60 ]; then
+                echo "🗑️ Auto-deleting branch older than 60 days: $BRANCH_NAME"
+                gh api --method DELETE repos/${{ github.repository }}/git/refs/heads/$BRANCH_NAME || \
+                  echo "⚠️ Failed to delete $BRANCH_NAME"
+              fi
+            fi
+          done
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "**Total stale branches found**: $STALE_COUNT" >> $GITHUB_STEP_SUMMARY
+
+          if [ $STALE_COUNT -eq 0 ]; then
+            echo "✅ No stale branches detected!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Consider reviewing and cleaning up stale branches" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  cleanup-closed-prs:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find Branches from Closed PRs
+        run: |
+          echo "## Closed PR Branch Cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get closed PRs from last 30 days
+          THIRTY_DAYS_AGO=$(date -d "30 days ago" --iso-8601)
+
+          CLOSED_PRS=$(gh pr list \
+            --state closed \
+            --limit 100 \
+            --search "closed:>=$THIRTY_DAYS_AGO" \
+            --json number,headRefName,mergedAt)
+
+          DELETED_COUNT=0
+
+          echo "$CLOSED_PRS" | jq -c '.[]' | while read -r pr; do
+            NUMBER=$(echo "$pr" | jq -r '.number')
+            BRANCH=$(echo "$pr" | jq -r '.headRefName')
+            MERGED=$(echo "$pr" | jq -r '.mergedAt')
+
+            # Check if branch still exists
+            if gh api repos/${{ github.repository }}/git/refs/heads/$BRANCH >/dev/null 2>&1; then
+              if [ "$MERGED" == "null" ]; then
+                echo "🗑️ Deleting branch from closed (unmerged) PR #$NUMBER: $BRANCH"
+              else
+                echo "🗑️ Deleting branch from merged PR #$NUMBER: $BRANCH"
+              fi
+
+              gh api --method DELETE repos/${{ github.repository }}/git/refs/heads/$BRANCH || \
+                echo "⚠️ Failed to delete $BRANCH"
+
+              DELETED_COUNT=$((DELETED_COUNT + 1))
+            fi
+          done
+
+          echo "**Branches deleted from closed PRs**: $DELETED_COUNT" >> $GITHUB_STEP_SUMMARY
+
+  generate-cleanup-report:
+    needs: [cleanup-stale-branches, cleanup-closed-prs]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Branch Health Report
+        run: |
+          # Create report
+          cat > branch-health-report.md << 'EOF'
+          # Branch Health Report
+
+          **Generated**: $(date)
+
+          ## Active Branches
+
+          $(gh api repos/${{ github.repository }}/branches | jq -r '.[] | "- `\(.name)` (protected: \(.protected))"')
+
+          ## Recent Activity
+
+          $(gh pr list --state open --limit 10 --json number,title,headRefName,createdAt | \
+            jq -r '.[] | "- PR #\(.number): `\(.headRefName)` - \(.title) (created \(.createdAt))"')
+
+          ## Recommendations
+
+          - Review stale branches monthly
+          - Delete branches after PR merge
+          - Use branch protection for important branches
+          - Follow naming conventions (feature/, bugfix/, hotfix/)
+          EOF
+
+          cat branch-health-report.md
+
+      - name: Post Report (Optional)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # Optionally create an issue with the report
+          gh issue create \
+            --title "Branch Health Report - $(date +%Y-%m-%d)" \
+            --body-file branch-health-report.md \
+            --label "maintenance,automated" || echo "Issue creation skipped"
